@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Capture a photo with its date, time, and location.">
+    <title>GeoSnap — Photo Capture</title>
+    <link rel="stylesheet" href="styles.css">
+    <script type="module" src="src/app.js"></script>
+  </head>
+  <body>
+    <main id="geosnap-app">
+      <header>
+        <h1>GeoSnap</h1>
+        <p>Capture a photo with its date, time, and location.</p>
+      </header>
+
+      <section aria-labelledby="camera-heading">
+        <h2 id="camera-heading">Camera</h2>
+        <div id="live-camera-preview" aria-label="Live camera preview">
+          <p>Camera preview will appear here.</p>
+        </div>
+      </section>
+
+      <section aria-labelledby="photo-preview-heading">
+        <h2 id="photo-preview-heading">Labelled photo preview</h2>
+        <div id="labelled-photo-preview" aria-label="Labelled photo preview">
+          <p>Your labelled photo will appear here.</p>
+        </div>
+      </section>
+
+      <nav aria-label="Photo actions">
+        <button id="open-camera-button" type="button">Open Camera</button>
+        <button id="capture-photo-button" type="button" disabled>Capture Photo</button>
+        <button id="refresh-location-button" type="button">Refresh Location</button>
+        <button id="retake-photo-button" type="button">Retake Photo</button>
+        <button id="download-image-button" type="button">Download Image</button>
+      </nav>
+
+      <p id="app-status" role="status" aria-live="polite" aria-atomic="true">
+        Ready.
+      </p>
+    </main>
+  </body>
+</html>
