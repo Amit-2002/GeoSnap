@@ -37,10 +37,10 @@
 
 - [ ] T004 [US1] Implement the visitor-triggered Open camera and Capture photo controls in `index.html`, ensuring camera opening only displays the live feed and Capture photo remains unavailable until the feed is ready.
 - [ ] T005 [US1] Implement camera permission and live-feed startup in `src/app.js`, preferring the rear-facing camera on mobile while allowing a generic-camera fallback when that preference is unavailable.
-- [ ] T006 [US1] Implement still capture in `src/app.js`, recording `capturedAt` at the instant the photo is taken and transitioning to `captured-photo`; do not derive or reset this timestamp from any location request/result.
+- [X] T006 [US1] Implement still capture in `src/app.js`, recording `capturedAt` at the instant the photo is taken and transitioning to `captured-photo`; do not derive or reset this timestamp from any location request/result.
 - [ ] T007 [US1] Implement visitor-triggered location refresh in `src/app.js` so it can start and complete before or after capture, records location status and result time separately, and allows the photo workflow to continue when permission is denied or GPS is unavailable.
-- [ ] T008 [US1] Compose the photo and bottom metadata label into a canvas-backed preview in `src/app.js`; display the capture date/time and available coordinates, clearly label unavailable location, and recompose both preview and embedded label if a location result arrives after preview readiness without changing `capturedAt`.
-- [ ] T009 [P] [US1] Implement the clean responsive camera and labelled-preview layout in `styles.css`, supporting portrait/landscape and viewport widths from 320 CSS pixels without horizontal overflow.
+- [X] T008 [US1] Compose the photo and bottom metadata label into a canvas-backed preview in `src/app.js`; display the capture date/time and available coordinates, clearly label unavailable location, and recompose both preview and embedded label if a location result arrives after preview readiness without changing `capturedAt`.
+- [X] T009 [P] [US1] Implement the clean responsive camera and labelled-preview layout in `styles.css`, supporting portrait/landscape and viewport widths from 320 CSS pixels without horizontal overflow.
 
 **Checkpoint**: Camera capture, immutable capture time, optional asynchronous GPS, canvas composition, and the labelled preview work through visible controls without voice recognition.
 
