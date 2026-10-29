@@ -137,6 +137,11 @@ button:focus-visible {
   outline-offset: 3px;
 }
 
+input:focus-visible {
+  outline: 3px solid #1554a3;
+  outline-offset: 3px;
+}
+
 button:disabled {
   border-color: #9aa5b5;
   background: #9aa5b5;
@@ -152,6 +157,12 @@ button:disabled {
   background: #e8f1ff;
   color: #172033;
   overflow-wrap: anywhere;
+}
+
+#app-status[data-status-type="error"] {
+  border-left-color: #b42318;
+  background: #fff1f0;
+  color: #641b16;
 }
 
 @media (min-width: 48rem) {

@@ -63,20 +63,77 @@ function showStatus(message, type = "status") {
 
   const statusElement = globalThis.document?.getElementById("app-status");
   if (statusElement) {
+    const isError = type === "error";
+    statusElement.setAttribute("role", isError ? "alert" : "status");
+    statusElement.setAttribute("aria-live", isError ? "assertive" : "polite");
+    statusElement.dataset.statusType = isError ? "error" : "status";
     statusElement.textContent = message;
   }
 }
 
+function restoreFocusIfLost(wasFocused, control) {
+  if (!wasFocused || !control || control.disabled) {
+    return;
+  }
+
+  const activeElement = globalThis.document?.activeElement;
+  if (
+    activeElement &&
+    activeElement !== document.body &&
+    activeElement !== document.documentElement
+  ) {
+    return;
+  }
+
+  try {
+    control.focus({ preventScroll: true });
+  } catch {
+    control.focus();
+  }
+}
+
+function reportUnexpectedFailure(operation, error, message) {
+  console.error(`${operation} failed:`, error);
+  showStatus(message, "error");
+}
+
 function getCameraErrorMessage(error) {
   if (error?.name === "NotAllowedError" || error?.name === "PermissionDeniedError") {
-    return "Camera access was denied. Allow camera access in your browser settings, then try again.";
+    return "Camera access was denied or the permission prompt was dismissed. Allow camera access for this site in your browser settings, then choose Open Camera to retry.";
   }
 
   if (error?.name === "NotFoundError" || error?.name === "DevicesNotFoundError") {
-    return "No camera was found on this device.";
+    return "No usable camera was found. Connect or enable a camera, then choose Open Camera to retry.";
   }
 
-  return "The camera could not be started. Check your camera connection and browser permissions, then try again.";
+  if (error?.name === "NotReadableError") {
+    return "The camera could not be opened and may be in use by another app. Close other apps using the camera, then choose Open Camera to retry.";
+  }
+
+  if (error?.name === "AbortError") {
+    return "Camera startup was interrupted. Choose Open Camera to try again.";
+  }
+
+  if (error?.name === "SecurityError") {
+    return "The browser blocked camera access. Check this site's browser permissions and use HTTPS or localhost, then choose Open Camera to retry.";
+  }
+
+  return "The camera could not be started. Check that a camera is connected and allowed in your browser settings, then choose Open Camera to retry.";
+}
+
+function setCameraPreviewMessage(message) {
+  const previewRegion = globalThis.document?.getElementById("live-camera-preview");
+  if (!previewRegion) {
+    return;
+  }
+
+  const video = previewRegion.querySelector("video");
+  if (video) {
+    video.srcObject = null;
+  }
+  const fallbackMessage = document.createElement("p");
+  fallbackMessage.textContent = message;
+  previewRegion.replaceChildren(fallbackMessage);
 }
 
 function shouldRetryWithoutRearCamera(error) {
@@ -161,26 +218,36 @@ async function openCamera() {
   const getUserMedia = mediaDevices?.getUserMedia;
   if (typeof getUserMedia !== "function") {
     if (globalThis.isSecureContext === false) {
+      setCameraPreviewMessage(
+        "Camera access needs a secure page. Open this site using HTTPS or localhost, then retry.",
+      );
       showStatus(
-        "Camera access requires a secure page. Use HTTPS or localhost, then try again.",
+        "Camera access requires a secure page. Use HTTPS or localhost, then choose Open Camera to retry.",
         "error",
       );
     } else {
-      showStatus("Camera access is unavailable in this browser or page context.", "error");
+      setCameraPreviewMessage(
+        "Camera access is not available in this browser. You can still use any photo already captured.",
+      );
+      showStatus(
+        "Camera access is unavailable in this browser or page context. Use a supported browser or page context, then choose Open Camera to retry.",
+        "error",
+      );
     }
     return;
   }
 
-  appState.currentOperation = "opening-camera";
-  if (openCameraButton) {
-    openCameraButton.disabled = true;
-  }
-  capturePhotoButton.disabled = true;
-  showStatus("Requesting camera access...");
-
   let stream = activeCameraStream;
+  const openCameraHadFocus = document.activeElement === openCameraButton;
 
   try {
+    appState.currentOperation = "opening-camera";
+    if (openCameraButton) {
+      openCameraButton.disabled = true;
+    }
+    capturePhotoButton.disabled = true;
+    showStatus("Requesting camera access...");
+
     if (!stream || !stream.getTracks().some((track) => track.readyState === "live")) {
       try {
         stream = await getUserMedia.call(mediaDevices, {
@@ -226,7 +293,13 @@ async function openCamera() {
 
         activeCameraStream = null;
         capturePhotoButton.disabled = true;
-        showStatus("The camera feed ended. Open the camera to try again.", "error");
+        setCameraPreviewMessage(
+          "The camera feed ended. Check the camera connection and permission, then choose Open Camera to retry.",
+        );
+        showStatus(
+          "The camera feed ended. Check the camera connection and permission, then choose Open Camera to retry.",
+          "error",
+        );
       }, { once: true });
     }
   } catch (error) {
@@ -238,12 +311,29 @@ async function openCamera() {
       activeCameraStream = null;
     }
 
-    showStatus(getCameraErrorMessage(error), "error");
+    try {
+      setCameraPreviewMessage(
+        "The camera preview is unavailable. Fix the issue described below, then choose Open Camera to retry.",
+      );
+      showStatus(getCameraErrorMessage(error), "error");
+    } catch (recoveryError) {
+      reportUnexpectedFailure(
+        "Camera recovery",
+        recoveryError,
+        "The camera could not be started. Use Open Camera to retry, or continue with any photo already captured.",
+      );
+    }
   } finally {
     appState.currentOperation = null;
     if (openCameraButton) {
       openCameraButton.disabled = false;
     }
+    restoreFocusIfLost(
+      openCameraHadFocus,
+      capturePhotoButton && !capturePhotoButton.disabled
+        ? capturePhotoButton
+        : openCameraButton,
+    );
   }
 }
 
@@ -380,24 +470,31 @@ async function composeLabelledPreview(
     return false;
   }
 
-  const previewRegion = document.getElementById("labelled-photo-preview");
-  if (!previewRegion) {
-    showStatus("The labelled photo preview is unavailable on this page.", "error");
-    return false;
-  }
-
-  observePreviewResize(previewRegion);
-  const renderVersion = ++previewRenderVersion;
-  const existingPreview = appState.workflowState === workflowStates.previewReady;
-  if (!silent) {
-    showStatus(
-      existingPreview
-        ? "Updating the labelled photo preview..."
-        : "Composing the labelled photo preview...",
-    );
-  }
+  let renderVersion = null;
+  let previewRegion = null;
+  let previousChildren = null;
+  const previousWorkflowState = appState.workflowState;
+  const previousLabelledPreview = appState.labelledPreview;
+  let previewWasReplaced = false;
 
   try {
+    previewRegion = document.getElementById("labelled-photo-preview");
+    if (!previewRegion) {
+      showStatus("The labelled photo preview is unavailable on this page.", "error");
+      return false;
+    }
+
+    observePreviewResize(previewRegion);
+    renderVersion = ++previewRenderVersion;
+    const existingPreview = appState.workflowState === workflowStates.previewReady;
+    if (!silent) {
+      showStatus(
+        existingPreview
+          ? "Updating the labelled photo preview..."
+          : "Composing the labelled photo preview...",
+      );
+    }
+
     const metadata = getPreviewMetadata();
     const image = await loadPhotoImage(appState.activePhoto);
     const photoWidth = image.naturalWidth;
@@ -449,15 +546,17 @@ async function composeLabelledPreview(
     previewImage.style.height = "auto";
     previewImage.style.display = "block";
 
+    previousChildren = [...previewRegion.childNodes];
+    previewRegion.replaceChildren(previewImage);
+    previewWasReplaced = true;
     if (appState.workflowState === workflowStates.capturedPhoto) {
       if (!transitionWorkflow(workflowStates.previewReady)) {
         throw new Error(appState.statusMessage);
       }
     } else if (appState.workflowState !== workflowStates.previewReady) {
+      previewRegion.replaceChildren(...previousChildren);
       return false;
     }
-
-    previewRegion.replaceChildren(previewImage);
 
     appState.labelledPreview = {
       photo: appState.activePhoto,
@@ -474,11 +573,35 @@ async function composeLabelledPreview(
     }
     return true;
   } catch (error) {
-    if (renderVersion === previewRenderVersion) {
-      console.error("Labelled photo preview failed:", error);
-      showStatus(
-        "The labelled photo preview could not be created. The captured photo is still available; try refreshing location to rebuild the preview.",
-        "error",
+    if (renderVersion === null || renderVersion === previewRenderVersion) {
+      if (previewWasReplaced && previewRegion && previousChildren) {
+        try {
+          previewRegion.replaceChildren(...previousChildren);
+        } catch (restoreError) {
+          console.error("Previous labelled preview could not be restored:", restoreError);
+        }
+      }
+      appState.labelledPreview = previousLabelledPreview;
+      if (
+        previousWorkflowState === workflowStates.capturedPhoto &&
+        appState.workflowState === workflowStates.previewReady
+      ) {
+        appState.workflowState = workflowStates.capturedPhoto;
+      }
+      const previousPreviewIsValid = Boolean(
+        previousLabelledPreview?.status === "preview-ready" &&
+        previousLabelledPreview.photo === appState.activePhoto,
+      );
+      const downloadImageButton = document.getElementById("download-image-button");
+      if (downloadImageButton) {
+        downloadImageButton.disabled = !previousPreviewIsValid;
+      }
+      reportUnexpectedFailure(
+        "Labelled photo preview",
+        error,
+        previousPreviewIsValid
+          ? "The updated preview could not be created. Your previous labelled preview is still available; try refreshing location again."
+          : "The labelled photo preview could not be created. Your captured photo and capture time are still available; try refreshing location to rebuild the preview or retake the photo.",
       );
     }
     return false;
@@ -502,11 +625,14 @@ function updatePreviewForLocationStatus(message, type = "status") {
 function capturePhoto() {
   const capturePhotoButton = document.getElementById("capture-photo-button");
   const retakePhotoButton = document.getElementById("retake-photo-button");
+  const openCameraButton = document.getElementById("open-camera-button");
   const previewRegion = document.getElementById("live-camera-preview");
   const video = previewRegion?.querySelector("video");
+  const capturePhotoHadFocus = document.activeElement === capturePhotoButton;
 
   if (appState.currentOperation || appState.workflowState !== workflowStates.noPhoto) {
     showStatus("A photo cannot be captured in the current workflow state.", "error");
+    restoreFocusIfLost(capturePhotoHadFocus, openCameraButton);
     return;
   }
 
@@ -518,16 +644,17 @@ function capturePhoto() {
       "The camera feed is not ready. Open the camera and wait for the live preview before capturing.",
       "error",
     );
+    restoreFocusIfLost(capturePhotoHadFocus, openCameraButton);
     return;
   }
 
-  appState.currentOperation = "capturing-photo";
-  if (capturePhotoButton) {
-    capturePhotoButton.disabled = true;
-  }
-  showStatus("Capturing photo...");
-
   try {
+    appState.currentOperation = "capturing-photo";
+    if (capturePhotoButton) {
+      capturePhotoButton.disabled = true;
+    }
+    showStatus("Capturing photo...");
+
     const canvas = document.createElement("canvas");
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
@@ -560,13 +687,26 @@ function capturePhoto() {
     );
   } finally {
     appState.currentOperation = null;
-    if (
-      appState.workflowState === workflowStates.noPhoto &&
-      capturePhotoButton &&
-      isVideoCaptureReady(video, activeCameraStream)
-    ) {
-      capturePhotoButton.disabled = false;
+    if (appState.workflowState === workflowStates.noPhoto && capturePhotoButton) {
+      try {
+        capturePhotoButton.disabled = !isVideoCaptureReady(video, activeCameraStream);
+      } catch (error) {
+        capturePhotoButton.disabled = true;
+        reportUnexpectedFailure(
+          "Camera readiness check",
+          error,
+          "The camera is not ready to capture. Choose Open Camera to reconnect, then try again.",
+        );
+      }
     }
+    restoreFocusIfLost(
+      capturePhotoHadFocus,
+      appState.workflowState === workflowStates.noPhoto
+        ? capturePhotoButton && !capturePhotoButton.disabled
+          ? capturePhotoButton
+          : openCameraButton
+        : retakePhotoButton,
+    );
   }
 }
 
@@ -577,6 +717,7 @@ function retakePhoto() {
   const livePreviewRegion = document.getElementById("live-camera-preview");
   const video = livePreviewRegion?.querySelector("video");
   const canCaptureImmediately = isVideoCaptureReady(video, activeCameraStream);
+  const retakePhotoHadFocus = document.activeElement === retakePhotoButton;
 
   if (
     appState.currentOperation ||
@@ -591,8 +732,37 @@ function retakePhoto() {
     return;
   }
 
+  let previousChildren;
+  try {
+    const labelledPreviewRegion = document.getElementById("labelled-photo-preview");
+    if (!labelledPreviewRegion) {
+      throw new Error("The labelled photo preview is unavailable on this page.");
+    }
+
+    previousChildren = [...labelledPreviewRegion.childNodes];
+    const emptyPreview = document.createElement("p");
+    emptyPreview.textContent = "Your labelled photo will appear here.";
+    labelledPreviewRegion.replaceChildren(emptyPreview);
+  } catch (error) {
+    reportUnexpectedFailure(
+      "Photo retake",
+      error,
+      "The photo could not be cleared safely, so your current photo and preview were kept. Try retaking again.",
+    );
+    restoreFocusIfLost(retakePhotoHadFocus, retakePhotoButton);
+    return;
+  }
+
   if (!transitionWorkflow(workflowStates.noPhoto)) {
+    try {
+      document
+        .getElementById("labelled-photo-preview")
+        ?.replaceChildren(...(previousChildren ?? []));
+    } catch (error) {
+      console.error("The previous photo preview could not be restored:", error);
+    }
     showStatus(appState.statusMessage, "error");
+    restoreFocusIfLost(retakePhotoHadFocus, retakePhotoButton);
     return;
   }
 
@@ -610,31 +780,20 @@ function retakePhoto() {
     capturePhotoButton.disabled = !canCaptureImmediately;
   }
 
-  try {
-    if (!document.getElementById("labelled-photo-preview")) {
-      throw new Error("The labelled photo preview is unavailable on this page.");
-    }
-
-    const emptyPreview = document.createElement("p");
-    emptyPreview.textContent = "Your labelled photo will appear here.";
-    document.getElementById("labelled-photo-preview").replaceChildren(emptyPreview);
-
-    showStatus(
-      canCaptureImmediately
-        ? "Photo cleared. You can take another photo."
-        : "Photo cleared. Open the camera to take another photo.",
-    );
-  } catch (error) {
-    console.error("Photo retake failed:", error);
-    showStatus(
-      "The photo was cleared, but the labelled preview could not be reset. Open the camera to take another photo.",
-      "error",
-    );
-  }
+  showStatus(
+    canCaptureImmediately
+      ? "Photo cleared. You can take another photo."
+      : "Photo cleared. Open the camera to take another photo.",
+  );
+  restoreFocusIfLost(
+    retakePhotoHadFocus,
+    canCaptureImmediately ? capturePhotoButton : document.getElementById("open-camera-button"),
+  );
 }
 
 function downloadImage() {
   const downloadImageButton = document.getElementById("download-image-button");
+  const downloadImageHadFocus = document.activeElement === downloadImageButton;
   const preview = appState.labelledPreview;
   const timestamp = appState.captureTimestamp;
   const timestampParts = timestamp?.match(
@@ -665,16 +824,16 @@ function downloadImage() {
   }
 
   const [, date, hours, minutes, seconds] = timestampParts;
-  const anchor = document.createElement("a");
-  anchor.href = preview.renderedImage;
-  anchor.download = `geosnap-${date}-${hours}-${minutes}-${seconds}.png`;
-
-  appState.currentOperation = "downloading-image";
-  if (downloadImageButton) {
-    downloadImageButton.disabled = true;
-  }
-
+  let anchor = null;
   try {
+    appState.currentOperation = "downloading-image";
+    if (downloadImageButton) {
+      downloadImageButton.disabled = true;
+    }
+
+    anchor = document.createElement("a");
+    anchor.href = preview.renderedImage;
+    anchor.download = `geosnap-${date}-${hours}-${minutes}-${seconds}.png`;
     document.body.append(anchor);
     anchor.click();
 
@@ -690,11 +849,16 @@ function downloadImage() {
       "error",
     );
   } finally {
-    anchor.remove();
+    try {
+      anchor?.remove();
+    } catch (error) {
+      console.error("Temporary download link could not be removed:", error);
+    }
     appState.currentOperation = null;
     if (downloadImageButton) {
       downloadImageButton.disabled = false;
     }
+    restoreFocusIfLost(downloadImageHadFocus, downloadImageButton);
   }
 }
 
@@ -706,9 +870,13 @@ function finishLocationRequest(requestId) {
   }
 
   appState.locationRequestInProgress = false;
-  const refreshLocationButton = document.getElementById("refresh-location-button");
-  if (refreshLocationButton) {
-    refreshLocationButton.disabled = false;
+  try {
+    const refreshLocationButton = document.getElementById("refresh-location-button");
+    if (refreshLocationButton) {
+      refreshLocationButton.disabled = false;
+    }
+  } catch (error) {
+    console.error("Location control could not be re-enabled:", error);
   }
   return true;
 }
@@ -726,97 +894,144 @@ function refreshLocation() {
     appState.locationUpdatedAt = null;
     if (
       !updatePreviewForLocationStatus(
-        "Location is unavailable; the preview was updated without coordinates.",
+        "Location is unavailable because this browser does not support geolocation; the preview was updated without coordinates. Photo capture remains available. Choose Refresh Location to try again in a supported browser.",
         "error",
       )
     ) {
       showStatus(
-        "Location is unavailable because geolocation is not supported in this browser.",
+        "Location is unavailable because geolocation is not supported in this browser. Photo capture, preview, retake, and download remain available without location.",
         "error",
       );
     }
     return;
   }
 
-  const refreshLocationButton = document.getElementById("refresh-location-button");
   const requestId = ++locationRequestId;
   appState.locationRequestInProgress = true;
   appState.locationStatus = "loading";
   appState.latitude = null;
   appState.longitude = null;
   appState.locationUpdatedAt = null;
-  if (refreshLocationButton) {
-    refreshLocationButton.disabled = true;
-  }
-  showStatus("Getting your location...");
-  updatePreviewForLocationStatus(
-    "Location request is in progress; the preview shows its current status.",
-  );
-
   try {
+    const refreshLocationButton = document.getElementById("refresh-location-button");
+    if (refreshLocationButton) {
+      refreshLocationButton.disabled = true;
+    }
+    showStatus("Getting your location...");
+    updatePreviewForLocationStatus(
+      "Location request is in progress; the preview shows its current status.",
+    );
+
     geolocation.getCurrentPosition(
       (position) => {
-        if (!finishLocationRequest(requestId)) {
+        if (
+          requestId !== locationRequestId ||
+          !appState.locationRequestInProgress
+        ) {
           return;
         }
 
-        appState.latitude = position.coords.latitude;
-        appState.longitude = position.coords.longitude;
-        appState.locationUpdatedAt = new Date().toISOString();
-        appState.locationStatus = "available";
-        if (
-          !updatePreviewForLocationStatus(
-            "Location received; the labelled preview was updated.",
-          )
-        ) {
-          showStatus("Location received successfully.");
+        let message = "Location received successfully.";
+        let messageType = "status";
+        try {
+          const latitude = position?.coords?.latitude;
+          const longitude = position?.coords?.longitude;
+          if (
+            !Number.isFinite(latitude) ||
+            latitude < -90 ||
+            latitude > 90 ||
+            !Number.isFinite(longitude) ||
+            longitude < -180 ||
+            longitude > 180
+          ) {
+            throw new Error("The browser returned invalid location coordinates.");
+          }
+
+          appState.latitude = latitude;
+          appState.longitude = longitude;
+          appState.locationUpdatedAt = new Date().toISOString();
+          appState.locationStatus = "available";
+          message = "Location received; the labelled preview was updated.";
+        } catch (error) {
+          console.error("Location result could not be used:", error);
+          appState.latitude = null;
+          appState.longitude = null;
+          appState.locationUpdatedAt = null;
+          appState.locationStatus = "unavailable";
+          message =
+            "The location result could not be used. The photo remains available without coordinates; choose Refresh Location to try again.";
+          messageType = "error";
+        } finally {
+          finishLocationRequest(requestId);
+        }
+
+        try {
+          if (!updatePreviewForLocationStatus(message, messageType)) {
+            showStatus(message, messageType);
+          }
+        } catch (error) {
+          reportUnexpectedFailure(
+            "Location preview update",
+            error,
+            "Location could not be displayed. Your photo and existing preview remain available; choose Refresh Location to try again.",
+          );
         }
       },
       (error) => {
-        if (!finishLocationRequest(requestId)) {
+        if (
+          requestId !== locationRequestId ||
+          !appState.locationRequestInProgress
+        ) {
           return;
         }
 
         appState.latitude = null;
         appState.longitude = null;
         appState.locationUpdatedAt = null;
+        let message;
+        let messageType = "error";
 
-        if (error.code === 1) {
-          appState.locationStatus = "denied";
-          if (
-            !updatePreviewForLocationStatus(
-              "Location access was denied; the preview was updated without coordinates.",
-              "error",
-            )
-          ) {
-            showStatus(
-              "Location access was denied. Allow location access in your browser settings, then try again.",
-              "error",
-            );
+        try {
+          if (error?.code === 1) {
+            appState.locationStatus = "denied";
+            message =
+              "Location access was denied or the permission prompt was dismissed. Allow location access for this site in your browser settings, then choose Refresh Location to retry. Photo capture remains available without location.";
+          } else if (error?.code === 3) {
+            appState.locationStatus = "timed-out";
+            message =
+              "The location request timed out. Check your signal or location services, then choose Refresh Location to retry. Photo capture remains available without location.";
+          } else {
+            appState.locationStatus = "unavailable";
+            message =
+              "Your location could not be determined. Check that location services are enabled, then choose Refresh Location to retry. Photo capture remains available without location.";
           }
-        } else if (error.code === 3) {
-          appState.locationStatus = "timed-out";
-          if (
-            !updatePreviewForLocationStatus(
-              "The location request timed out; the preview was updated without coordinates.",
-              "error",
-            )
-          ) {
-            showStatus("The location request timed out. Check your signal and try again.", "error");
-          }
-        } else {
+        } catch (unexpectedError) {
+          console.error("Location error could not be handled:", unexpectedError);
           appState.locationStatus = "unavailable";
-          if (
-            !updatePreviewForLocationStatus(
-              "Location is unavailable; the preview was updated without coordinates.",
-              "error",
-            )
-          ) {
-            showStatus(
-              "Your location could not be determined. Check that location services are enabled, then try again.",
-              "error",
-            );
+          message =
+            "Location is unavailable. Your photo workflow can continue without coordinates; choose Refresh Location to retry.";
+        } finally {
+          finishLocationRequest(requestId);
+        }
+
+        try {
+          const previewMessage = {
+            denied:
+              "Location access was denied or the permission prompt was dismissed; the preview was updated without coordinates. Choose Refresh Location to try again.",
+            "timed-out":
+              "The location request timed out; the preview was updated without coordinates. Choose Refresh Location to try again.",
+            unavailable:
+              "Location is unavailable; the preview was updated without coordinates. Choose Refresh Location to try again.",
+          }[appState.locationStatus];
+          if (!updatePreviewForLocationStatus(previewMessage, messageType)) {
+            showStatus(message, messageType);
           }
+        } catch (unexpectedError) {
+          reportUnexpectedFailure(
+            "Location error recovery",
+            unexpectedError,
+            "Location is unavailable, but photo capture, preview, retake, and download remain available without coordinates.",
+          );
         }
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
@@ -830,12 +1045,12 @@ function refreshLocation() {
       appState.locationStatus = "unavailable";
       if (
         !updatePreviewForLocationStatus(
-          "Location is unavailable; the preview was updated without coordinates.",
+          "Location is unavailable; the preview was updated without coordinates. Choose Refresh Location to try again.",
           "error",
         )
       ) {
         showStatus(
-          "Your location could not be requested. Check your browser settings and try again.",
+          "Your location could not be requested. Check this site's browser permissions and location services, then choose Refresh Location to retry. Photo capture remains available without location.",
           "error",
         );
       }
@@ -843,20 +1058,58 @@ function refreshLocation() {
   }
 }
 
+function runActionSafely(action, failureMessage) {
+  try {
+    const result = action();
+    if (result && typeof result.then === "function") {
+      result.catch((error) =>
+        reportUnexpectedFailure("Photo workflow action", error, failureMessage),
+      );
+    }
+  } catch (error) {
+    reportUnexpectedFailure("Photo workflow action", error, failureMessage);
+  }
+}
+
 const openCameraButton = globalThis.document?.getElementById("open-camera-button");
-openCameraButton?.addEventListener("click", openCamera);
+openCameraButton?.addEventListener("click", () =>
+  runActionSafely(
+    openCamera,
+    "The camera action could not be completed. Choose Open Camera to retry, or continue with any photo already captured.",
+  ),
+);
 
 const capturePhotoButton = globalThis.document?.getElementById("capture-photo-button");
-capturePhotoButton?.addEventListener("click", capturePhoto);
+capturePhotoButton?.addEventListener("click", () =>
+  runActionSafely(
+    capturePhoto,
+    "The photo could not be captured. Check the live camera feed and try again.",
+  ),
+);
 
 const refreshLocationButton = globalThis.document?.getElementById("refresh-location-button");
-refreshLocationButton?.addEventListener("click", refreshLocation);
+refreshLocationButton?.addEventListener("click", () =>
+  runActionSafely(
+    refreshLocation,
+    "Location could not be refreshed. Your photo workflow can continue without location; choose Refresh Location to try again.",
+  ),
+);
 
 const retakePhotoButton = globalThis.document?.getElementById("retake-photo-button");
-retakePhotoButton?.addEventListener("click", retakePhoto);
+retakePhotoButton?.addEventListener("click", () =>
+  runActionSafely(
+    retakePhoto,
+    "The photo could not be retaken. Your current photo and preview remain available.",
+  ),
+);
 
 const downloadImageButton = globalThis.document?.getElementById("download-image-button");
-downloadImageButton?.addEventListener("click", downloadImage);
+downloadImageButton?.addEventListener("click", () =>
+  runActionSafely(
+    downloadImage,
+    "The image could not be downloaded. Your labelled preview remains available; try again.",
+  ),
+);
 
 const SpeechRecognitionConstructor =
   globalThis.SpeechRecognition ?? globalThis.webkitSpeechRecognition;
@@ -869,6 +1122,7 @@ let voiceRecognition = null;
 let voiceRecognitionActive = false;
 let voiceRecognitionErrorMessage = null;
 let voiceStopRequested = false;
+let voiceSessionHadFocus = false;
 
 function updateVoiceControls() {
   if (voiceDisclosureAcknowledgment) {
@@ -883,6 +1137,29 @@ function updateVoiceControls() {
   if (stopVoiceButton) {
     stopVoiceButton.disabled = !voiceRecognitionActive;
   }
+}
+
+function recoverVoiceRecognition(error, message) {
+  console.error("Voice recognition failed:", error);
+  voiceRecognitionErrorMessage = message;
+  voiceStopRequested = false;
+  voiceRecognitionActive = false;
+  const shouldRestoreFocus = voiceSessionHadFocus;
+  voiceSessionHadFocus = false;
+  const recognition = voiceRecognition;
+  voiceRecognition = null;
+  try {
+    recognition?.abort?.();
+  } catch (abortError) {
+    console.error("Voice recognition could not be aborted during recovery:", abortError);
+  }
+  try {
+    updateVoiceControls();
+  } catch (controlError) {
+    console.error("Voice controls could not be reset:", controlError);
+  }
+  restoreFocusIfLost(shouldRestoreFocus, startVoiceButton);
+  showStatus(message, "error");
 }
 
 function normalizeVoiceCommand(transcript) {
@@ -900,10 +1177,17 @@ if (!SpeechRecognitionConstructor) {
 } else {
   updateVoiceControls();
   voiceDisclosureAcknowledgment?.addEventListener("change", () => {
-    updateVoiceControls();
-    if (!voiceDisclosureAcknowledgment.checked && voiceRecognitionActive) {
-      voiceStopRequested = true;
-      voiceRecognition?.stop();
+    try {
+      updateVoiceControls();
+      if (!voiceDisclosureAcknowledgment.checked && voiceRecognitionActive) {
+        voiceStopRequested = true;
+        voiceRecognition?.stop();
+      }
+    } catch (error) {
+      recoverVoiceRecognition(
+        error,
+        "Voice recognition could not be stopped after the disclosure changed. Use the Stop voice recognition button or manual controls.",
+      );
     }
   });
 
@@ -912,78 +1196,112 @@ if (!SpeechRecognitionConstructor) {
       return;
     }
 
+    voiceSessionHadFocus = document.activeElement === startVoiceButton;
     try {
       voiceRecognition = new SpeechRecognitionConstructor();
       voiceRecognition.continuous = false;
       voiceRecognition.interimResults = false;
       const processedResults = new Set();
       voiceRecognition.onresult = (event) => {
-        if (!voiceDisclosureAcknowledgment?.checked) {
-          return;
-        }
-
-        for (let index = event.resultIndex; index < event.results.length; index += 1) {
-          const result = event.results[index];
-          if (!result.isFinal) {
-            continue;
+        try {
+          if (!voiceDisclosureAcknowledgment?.checked) {
+            return;
           }
 
-          const command = normalizeVoiceCommand(result[0]?.transcript ?? "");
-          const resultKey = `${index}:${command}`;
-          if (processedResults.has(resultKey)) {
-            continue;
-          }
-          processedResults.add(resultKey);
+          for (let index = event.resultIndex; index < event.results.length; index += 1) {
+            const result = event.results[index];
+            if (!result.isFinal) {
+              continue;
+            }
 
-          if (
-            ![
-              "take photo",
-              "refresh location",
-              "retake photo",
-              "download image",
-            ].includes(command)
-          ) {
-            showStatus(
-              "I didn't recognize that command. Try take photo, refresh location, retake photo, or download image.",
-            );
-            continue;
-          }
+            const transcript = result[0]?.transcript ?? "";
+            const command = normalizeVoiceCommand(transcript);
+            const resultKey = `${index}:${command}`;
+            if (processedResults.has(resultKey)) {
+              continue;
+            }
+            processedResults.add(resultKey);
 
-          showStatus(`Voice command recognized: ${command}.`);
-          switch (command) {
-            case "take photo":
-              capturePhoto();
-              break;
-            case "refresh location":
-              refreshLocation();
-              break;
-            case "retake photo":
-              retakePhoto();
-              break;
-            case "download image":
-              downloadImage();
-              break;
+            if (
+              ![
+                "take photo",
+                "refresh location",
+                "retake photo",
+                "download image",
+              ].includes(command)
+            ) {
+              const recognizedText = transcript.trim().slice(0, 120);
+              showStatus(
+                recognizedText
+                  ? `Recognized speech: "${recognizedText}". This is not a supported command. Try take photo, refresh location, retake photo, or download image.`
+                  : "I couldn't understand that speech. Try take photo, refresh location, retake photo, or download image.",
+                "error",
+              );
+              continue;
+            }
+
+            showStatus(`Voice command recognized: ${command}.`);
+            switch (command) {
+              case "take photo":
+                capturePhoto();
+                break;
+              case "refresh location":
+                refreshLocation();
+                break;
+              case "retake photo":
+                retakePhoto();
+                break;
+              case "download image":
+                downloadImage();
+                break;
+            }
           }
+        } catch (error) {
+          recoverVoiceRecognition(
+            error,
+            "The speech result could not be processed. Start voice recognition to try again, or use the manual controls.",
+          );
         }
       };
       voiceRecognition.onstart = () => {
-        voiceRecognitionActive = true;
-        updateVoiceControls();
-        showStatus("Voice recognition is listening.");
+        try {
+          voiceRecognitionActive = true;
+          updateVoiceControls();
+          restoreFocusIfLost(voiceSessionHadFocus, stopVoiceButton);
+          showStatus("Voice recognition is listening.");
+        } catch (error) {
+          recoverVoiceRecognition(
+            error,
+            "Voice recognition could not continue. Start it again or use the manual controls.",
+          );
+        }
       };
       voiceRecognition.onend = () => {
-        voiceRecognitionActive = false;
-        updateVoiceControls();
-        if (!voiceRecognitionErrorMessage && voiceStopRequested) {
-          showStatus("Voice recognition stopped.");
+        try {
+          const shouldRestoreFocus =
+            voiceSessionHadFocus &&
+            (document.activeElement === stopVoiceButton ||
+              document.activeElement === document.body ||
+              document.activeElement === document.documentElement);
+          voiceRecognitionActive = false;
+          updateVoiceControls();
+          voiceSessionHadFocus = false;
+          restoreFocusIfLost(shouldRestoreFocus, startVoiceButton);
+          if (!voiceRecognitionErrorMessage && voiceStopRequested) {
+            showStatus("Voice recognition stopped.");
+          }
+          voiceStopRequested = false;
+        } catch (error) {
+          recoverVoiceRecognition(
+            error,
+            "Voice recognition ended unexpectedly. Start it again or use the manual controls.",
+          );
         }
-        voiceStopRequested = false;
       };
       voiceRecognition.onerror = (event) => {
-        console.error("Voice recognition failed:", event.error);
         const messages = {
           "not-allowed":
-            "Microphone permission was denied. Allow microphone access in browser settings to use voice recognition.",
+            "Microphone permission was denied. Allow microphone access for this site in browser settings, then start voice recognition again or use the manual controls.",
           "service-not-allowed":
             "The speech-recognition service is unavailable or not permitted. You can try again or use the manual controls.",
           "audio-capture":
@@ -992,25 +1310,39 @@ if (!SpeechRecognitionConstructor) {
             "The speech-recognition service could not be reached. Check your connection or use the manual controls.",
           "language-not-supported":
             "The selected language is not supported for speech recognition.",
-          "no-speech": "No speech was detected. Try speaking after starting voice recognition.",
-          aborted: "Voice recognition was stopped before it finished.",
+          "no-speech":
+            "No speech was detected. Start voice recognition again and speak after it begins listening, or use the manual controls.",
+          aborted:
+            "Voice recognition was interrupted. Start it again to retry, or use the manual controls.",
         };
-        voiceRecognitionErrorMessage =
-          messages[event.error] ??
-          "Voice recognition encountered an error. You can try again or use the manual controls.";
-        showStatus(voiceRecognitionErrorMessage, "error");
+        recoverVoiceRecognition(
+          event?.error,
+          messages[event?.error] ??
+            "Voice recognition encountered an unexpected error. Start it again to retry, or use the manual controls.",
+        );
       };
       voiceRecognitionErrorMessage = null;
       voiceStopRequested = false;
       voiceRecognition.start();
       voiceRecognitionActive = true;
       updateVoiceControls();
+      restoreFocusIfLost(voiceSessionHadFocus, stopVoiceButton);
       showStatus("Starting voice recognition...");
     } catch (error) {
-      console.error("Voice recognition could not be started:", error);
+      const recognition = voiceRecognition;
       voiceRecognition = null;
       voiceRecognitionActive = false;
+      voiceStopRequested = false;
+      const shouldRestoreFocus = voiceSessionHadFocus;
+      voiceSessionHadFocus = false;
       updateVoiceControls();
+      try {
+        recognition?.abort?.();
+      } catch (abortError) {
+        console.error("Voice recognition could not be aborted after startup failed:", abortError);
+      }
+      console.error("Voice recognition could not be started:", error);
+      restoreFocusIfLost(shouldRestoreFocus, startVoiceButton);
       showStatus("Voice recognition could not be started. You can try again.", "error");
     }
   });
@@ -1024,9 +1356,10 @@ if (!SpeechRecognitionConstructor) {
       voiceStopRequested = true;
       voiceRecognition.stop();
     } catch (error) {
-      voiceStopRequested = false;
-      console.error("Voice recognition could not be stopped:", error);
-      showStatus("Voice recognition could not be stopped cleanly.", "error");
+      recoverVoiceRecognition(
+        error,
+        "Voice recognition could not stop normally and was reset. Start it again to retry, or use the manual controls.",
+      );
     }
   });
 }

@@ -85,9 +85,9 @@
 
 ### Implementation for User Story 4
 
-- [ ] T015 [US4] Complete camera and location denial, unavailable-device, cancellation, and retry messaging in `src/app.js` and `index.html`; never present a fabricated location and never block date/time capture, preview, retake, or download when location is missing.
-- [ ] T016 [US4] Complete unsupported speech, microphone denial, unclear-command, and interrupted-recognition recovery in `src/app.js` and `index.html`, retaining visible manual controls in every case.
-- [ ] T017 [US4] Complete accessible status/error presentation and keyboard operation for all controls in `index.html` and `styles.css`, including responsive feedback at narrow/mobile viewports and without unexpected focus movement.
+- [X] T015 [US4] Complete camera and location denial, unavailable-device, cancellation, and retry messaging in `src/app.js` and `index.html`; never present a fabricated location and never block date/time capture, preview, retake, or download when location is missing.
+- [X] T016 [US4] Complete unsupported speech, microphone denial, unclear-command, and interrupted-recognition recovery in `src/app.js` and `index.html`, retaining visible manual controls in every case.
+- [X] T017 [US4] Complete accessible status/error presentation and keyboard operation for all controls in `index.html` and `styles.css`, including responsive feedback at narrow/mobile viewports and without unexpected focus movement.
 
 **Checkpoint**: Camera, location, microphone, speech, composition, and download failures provide clear feedback while preserving unaffected workflows.
 
@@ -97,8 +97,8 @@
 
 **Purpose**: Verify the privacy boundary and validate the integrated experience.
 
-- [ ] T018 [P] Confirm the client-only implementation in `src/app.js` and `index.html` stores photo/metadata only for the active page session and does not send captured photos, location, or raw audio to an application-operated service.
-- [ ] T019 Run and record manual validation results in `specs/001-geosnap/quickstart.md`, noting the browser and device, camera/location/microphone permission outcomes and failures, a GPS refresh completing after preview creation (verify both preview and embedded label update without changing capture date/time), and readability of the label in the downloaded image; record download initiation rather than claiming the browser confirmed the file was saved.
+- [X] T018 [P] Confirm the client-only implementation in `src/app.js` and `index.html` stores photo/metadata only for the active page session and does not send captured photos, location, or raw audio to an application-operated service.
+- [X] T019 Run and record manual validation results in `specs/001-geosnap/quickstart.md`, noting the browser and device, camera/location/microphone permission outcomes and failures, a GPS refresh completing after preview creation (verify both preview and embedded label update without changing capture date/time), and readability of the label in the downloaded image; record download initiation rather than claiming the browser confirmed the file was saved.
 
 ---
 

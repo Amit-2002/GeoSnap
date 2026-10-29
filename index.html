@@ -17,25 +17,50 @@
 
       <section aria-labelledby="camera-heading">
         <h2 id="camera-heading">Camera</h2>
-        <div id="live-camera-preview" aria-label="Live camera preview">
+        <div id="live-camera-preview" role="region" aria-labelledby="camera-heading">
           <p>Camera preview will appear here.</p>
         </div>
+        <p id="camera-help">
+          Camera access is requested when you choose Open Camera. If access is denied or the
+          permission prompt is dismissed, update this site's camera permission in your browser
+          settings and choose Open Camera to retry.
+        </p>
       </section>
 
       <section aria-labelledby="photo-preview-heading">
         <h2 id="photo-preview-heading">Labelled photo preview</h2>
-        <div id="labelled-photo-preview" aria-label="Labelled photo preview">
+        <div
+          id="labelled-photo-preview"
+          role="region"
+          aria-labelledby="photo-preview-heading"
+        >
           <p>Your labelled photo will appear here.</p>
         </div>
       </section>
 
       <nav aria-label="Photo actions">
-        <button id="open-camera-button" type="button">Open Camera</button>
-        <button id="capture-photo-button" type="button" disabled>Capture Photo</button>
-        <button id="refresh-location-button" type="button">Refresh Location</button>
+        <button id="open-camera-button" type="button" aria-describedby="camera-help">
+          Open Camera
+        </button>
+        <button
+          id="capture-photo-button"
+          type="button"
+          aria-describedby="camera-help"
+          disabled
+        >
+          Capture Photo
+        </button>
+        <button id="refresh-location-button" type="button" aria-describedby="location-help">
+          Refresh Location
+        </button>
         <button id="retake-photo-button" type="button" disabled>Retake Photo</button>
         <button id="download-image-button" type="button" disabled>Download Image</button>
       </nav>
+      <p id="location-help">
+        Location is optional. If it is denied, unavailable, or times out, the photo can still be
+        captured, previewed, retaken, and downloaded with its date and time. Choose Refresh
+        Location to retry.
+      </p>
 
       <section aria-labelledby="voice-controls-heading">
         <h2 id="voice-controls-heading">Optional voice recognition</h2>
@@ -44,14 +69,38 @@
           and may require an internet connection.
         </p>
         <label>
-          <input id="voice-disclosure-acknowledgment" type="checkbox" disabled>
+          <input
+            id="voice-disclosure-acknowledgment"
+            type="checkbox"
+            aria-describedby="voice-disclosure"
+            disabled
+          >
           I understand how speech input may be processed.
         </label>
-        <button id="start-voice-button" type="button" disabled>Start voice recognition</button>
-        <button id="stop-voice-button" type="button" disabled>Stop voice recognition</button>
+        <button
+          id="start-voice-button"
+          type="button"
+          aria-describedby="voice-disclosure voice-help"
+          disabled
+        >
+          Start voice recognition
+        </button>
+        <button
+          id="stop-voice-button"
+          type="button"
+          aria-describedby="voice-help"
+          disabled
+        >
+          Stop voice recognition
+        </button>
+        <p id="voice-help">
+          Voice recognition is optional. If it is unsupported, the microphone is unavailable, or
+          recognition is interrupted, check this site's microphone permission and start again.
+          The photo and location buttons remain available.
+        </p>
       </section>
 
-      <p id="app-status" role="status" aria-live="polite" aria-atomic="true">
+      <p id="app-status" role="status" aria-live="polite" aria-atomic="true" data-status-type="status">
         Ready.
       </p>
     </main>
