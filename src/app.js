@@ -465,6 +465,10 @@ async function composeLabelledPreview(
       renderedImage,
       status: "preview-ready",
     };
+    const downloadImageButton = document.getElementById("download-image-button");
+    if (downloadImageButton) {
+      downloadImageButton.disabled = false;
+    }
     if (!silent) {
       showStatus(completionMessage ?? "Labelled photo preview is ready.", completionType);
     }
@@ -497,6 +501,7 @@ function updatePreviewForLocationStatus(message, type = "status") {
 
 function capturePhoto() {
   const capturePhotoButton = document.getElementById("capture-photo-button");
+  const retakePhotoButton = document.getElementById("retake-photo-button");
   const previewRegion = document.getElementById("live-camera-preview");
   const video = previewRegion?.querySelector("video");
 
@@ -542,6 +547,9 @@ function capturePhoto() {
 
     appState.activePhoto = imageData;
     appState.captureTimestamp = captureTimestamp;
+    if (retakePhotoButton) {
+      retakePhotoButton.disabled = false;
+    }
     showStatus("Photo captured. Composing labelled preview...");
     void composeLabelledPreview("Photo captured. Labelled preview is ready.");
   } catch (error) {
@@ -558,6 +566,134 @@ function capturePhoto() {
       isVideoCaptureReady(video, activeCameraStream)
     ) {
       capturePhotoButton.disabled = false;
+    }
+  }
+}
+
+function retakePhoto() {
+  const retakePhotoButton = document.getElementById("retake-photo-button");
+  const capturePhotoButton = document.getElementById("capture-photo-button");
+  const downloadImageButton = document.getElementById("download-image-button");
+  const livePreviewRegion = document.getElementById("live-camera-preview");
+  const video = livePreviewRegion?.querySelector("video");
+  const canCaptureImmediately = isVideoCaptureReady(video, activeCameraStream);
+
+  if (
+    appState.currentOperation ||
+    !appState.activePhoto ||
+    ![
+      workflowStates.capturedPhoto,
+      workflowStates.previewReady,
+      workflowStates.downloadedPhoto,
+    ].includes(appState.workflowState)
+  ) {
+    showStatus("There is no captured photo available to retake.", "error");
+    return;
+  }
+
+  if (!transitionWorkflow(workflowStates.noPhoto)) {
+    showStatus(appState.statusMessage, "error");
+    return;
+  }
+
+  previewRenderVersion += 1;
+  appState.activePhoto = null;
+  appState.captureTimestamp = null;
+  appState.labelledPreview = null;
+  if (retakePhotoButton) {
+    retakePhotoButton.disabled = true;
+  }
+  if (downloadImageButton) {
+    downloadImageButton.disabled = true;
+  }
+  if (capturePhotoButton) {
+    capturePhotoButton.disabled = !canCaptureImmediately;
+  }
+
+  try {
+    if (!document.getElementById("labelled-photo-preview")) {
+      throw new Error("The labelled photo preview is unavailable on this page.");
+    }
+
+    const emptyPreview = document.createElement("p");
+    emptyPreview.textContent = "Your labelled photo will appear here.";
+    document.getElementById("labelled-photo-preview").replaceChildren(emptyPreview);
+
+    showStatus(
+      canCaptureImmediately
+        ? "Photo cleared. You can take another photo."
+        : "Photo cleared. Open the camera to take another photo.",
+    );
+  } catch (error) {
+    console.error("Photo retake failed:", error);
+    showStatus(
+      "The photo was cleared, but the labelled preview could not be reset. Open the camera to take another photo.",
+      "error",
+    );
+  }
+}
+
+function downloadImage() {
+  const downloadImageButton = document.getElementById("download-image-button");
+  const preview = appState.labelledPreview;
+  const timestamp = appState.captureTimestamp;
+  const timestampParts = timestamp?.match(
+    /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})/,
+  );
+  const previewIsValid = Boolean(
+    preview?.status === "preview-ready" &&
+    preview.photo === appState.activePhoto &&
+    preview.metadata?.capturedAt === timestamp &&
+    typeof preview.renderedImage === "string" &&
+    preview.renderedImage.startsWith("data:image/png;base64,") &&
+    timestampParts &&
+    !Number.isNaN(new Date(timestamp).getTime()),
+  );
+
+  if (
+    appState.currentOperation ||
+    ![workflowStates.previewReady, workflowStates.downloadedPhoto].includes(
+      appState.workflowState,
+    ) ||
+    !previewIsValid
+  ) {
+    showStatus(
+      "A completed labelled preview is required before downloading. Capture a photo or wait for its preview to finish.",
+      "error",
+    );
+    return;
+  }
+
+  const [, date, hours, minutes, seconds] = timestampParts;
+  const anchor = document.createElement("a");
+  anchor.href = preview.renderedImage;
+  anchor.download = `geosnap-${date}-${hours}-${minutes}-${seconds}.png`;
+
+  appState.currentOperation = "downloading-image";
+  if (downloadImageButton) {
+    downloadImageButton.disabled = true;
+  }
+
+  try {
+    document.body.append(anchor);
+    anchor.click();
+
+    if (!transitionWorkflow(workflowStates.downloadedPhoto)) {
+      throw new Error(appState.statusMessage);
+    }
+
+    showStatus("Download initiated. Check your browser's downloads for the labelled image.");
+  } catch (error) {
+    console.error("Image download could not be initiated:", error);
+    showStatus(
+      "The download could not be initiated. Your labelled preview is still available; try downloading again.",
+      "error",
+    );
+  } finally {
+    anchor.remove();
+    appState.currentOperation = null;
+    if (downloadImageButton) {
+      downloadImageButton.disabled = false;
     }
   }
 }
@@ -715,3 +851,182 @@ capturePhotoButton?.addEventListener("click", capturePhoto);
 
 const refreshLocationButton = globalThis.document?.getElementById("refresh-location-button");
 refreshLocationButton?.addEventListener("click", refreshLocation);
+
+const retakePhotoButton = globalThis.document?.getElementById("retake-photo-button");
+retakePhotoButton?.addEventListener("click", retakePhoto);
+
+const downloadImageButton = globalThis.document?.getElementById("download-image-button");
+downloadImageButton?.addEventListener("click", downloadImage);
+
+const SpeechRecognitionConstructor =
+  globalThis.SpeechRecognition ?? globalThis.webkitSpeechRecognition;
+const voiceDisclosureAcknowledgment = globalThis.document?.getElementById(
+  "voice-disclosure-acknowledgment",
+);
+const startVoiceButton = globalThis.document?.getElementById("start-voice-button");
+const stopVoiceButton = globalThis.document?.getElementById("stop-voice-button");
+let voiceRecognition = null;
+let voiceRecognitionActive = false;
+let voiceRecognitionErrorMessage = null;
+let voiceStopRequested = false;
+
+function updateVoiceControls() {
+  if (voiceDisclosureAcknowledgment) {
+    voiceDisclosureAcknowledgment.disabled = !SpeechRecognitionConstructor;
+  }
+  if (startVoiceButton) {
+    startVoiceButton.disabled =
+      !SpeechRecognitionConstructor ||
+      !voiceDisclosureAcknowledgment?.checked ||
+      voiceRecognitionActive;
+  }
+  if (stopVoiceButton) {
+    stopVoiceButton.disabled = !voiceRecognitionActive;
+  }
+}
+
+function normalizeVoiceCommand(transcript) {
+  return transcript
+    .toLowerCase()
+    .trim()
+    .replace(/^\p{P}+|\p{P}+$/gu, "")
+    .trim();
+}
+
+if (!SpeechRecognitionConstructor) {
+  showStatus(
+    "Voice recognition is not supported in this browser. You can continue using the manual controls.",
+  );
+} else {
+  updateVoiceControls();
+  voiceDisclosureAcknowledgment?.addEventListener("change", () => {
+    updateVoiceControls();
+    if (!voiceDisclosureAcknowledgment.checked && voiceRecognitionActive) {
+      voiceStopRequested = true;
+      voiceRecognition?.stop();
+    }
+  });
+
+  startVoiceButton?.addEventListener("click", () => {
+    if (!voiceDisclosureAcknowledgment?.checked || voiceRecognitionActive) {
+      return;
+    }
+
+    try {
+      voiceRecognition = new SpeechRecognitionConstructor();
+      voiceRecognition.continuous = false;
+      voiceRecognition.interimResults = false;
+      const processedResults = new Set();
+      voiceRecognition.onresult = (event) => {
+        if (!voiceDisclosureAcknowledgment?.checked) {
+          return;
+        }
+
+        for (let index = event.resultIndex; index < event.results.length; index += 1) {
+          const result = event.results[index];
+          if (!result.isFinal) {
+            continue;
+          }
+
+          const command = normalizeVoiceCommand(result[0]?.transcript ?? "");
+          const resultKey = `${index}:${command}`;
+          if (processedResults.has(resultKey)) {
+            continue;
+          }
+          processedResults.add(resultKey);
+
+          if (
+            ![
+              "take photo",
+              "refresh location",
+              "retake photo",
+              "download image",
+            ].includes(command)
+          ) {
+            showStatus(
+              "I didn't recognize that command. Try take photo, refresh location, retake photo, or download image.",
+            );
+            continue;
+          }
+
+          showStatus(`Voice command recognized: ${command}.`);
+          switch (command) {
+            case "take photo":
+              capturePhoto();
+              break;
+            case "refresh location":
+              refreshLocation();
+              break;
+            case "retake photo":
+              retakePhoto();
+              break;
+            case "download image":
+              downloadImage();
+              break;
+          }
+        }
+      };
+      voiceRecognition.onstart = () => {
+        voiceRecognitionActive = true;
+        updateVoiceControls();
+        showStatus("Voice recognition is listening.");
+      };
+      voiceRecognition.onend = () => {
+        voiceRecognitionActive = false;
+        updateVoiceControls();
+        if (!voiceRecognitionErrorMessage && voiceStopRequested) {
+          showStatus("Voice recognition stopped.");
+        }
+        voiceStopRequested = false;
+      };
+      voiceRecognition.onerror = (event) => {
+        console.error("Voice recognition failed:", event.error);
+        const messages = {
+          "not-allowed":
+            "Microphone permission was denied. Allow microphone access in browser settings to use voice recognition.",
+          "service-not-allowed":
+            "The speech-recognition service is unavailable or not permitted. You can try again or use the manual controls.",
+          "audio-capture":
+            "No usable microphone was found. Check your microphone or use the manual controls.",
+          network:
+            "The speech-recognition service could not be reached. Check your connection or use the manual controls.",
+          "language-not-supported":
+            "The selected language is not supported for speech recognition.",
+          "no-speech": "No speech was detected. Try speaking after starting voice recognition.",
+          aborted: "Voice recognition was stopped before it finished.",
+        };
+        voiceRecognitionErrorMessage =
+          messages[event.error] ??
+          "Voice recognition encountered an error. You can try again or use the manual controls.";
+        showStatus(voiceRecognitionErrorMessage, "error");
+      };
+      voiceRecognitionErrorMessage = null;
+      voiceStopRequested = false;
+      voiceRecognition.start();
+      voiceRecognitionActive = true;
+      updateVoiceControls();
+      showStatus("Starting voice recognition...");
+    } catch (error) {
+      console.error("Voice recognition could not be started:", error);
+      voiceRecognition = null;
+      voiceRecognitionActive = false;
+      updateVoiceControls();
+      showStatus("Voice recognition could not be started. You can try again.", "error");
+    }
+  });
+
+  stopVoiceButton?.addEventListener("click", () => {
+    if (!voiceRecognitionActive || !voiceRecognition) {
+      return;
+    }
+
+    try {
+      voiceStopRequested = true;
+      voiceRecognition.stop();
+    } catch (error) {
+      voiceStopRequested = false;
+      console.error("Voice recognition could not be stopped:", error);
+      showStatus("Voice recognition could not be stopped cleanly.", "error");
+    }
+  });
+}

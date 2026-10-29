@@ -33,9 +33,23 @@
         <button id="open-camera-button" type="button">Open Camera</button>
         <button id="capture-photo-button" type="button" disabled>Capture Photo</button>
         <button id="refresh-location-button" type="button">Refresh Location</button>
-        <button id="retake-photo-button" type="button">Retake Photo</button>
-        <button id="download-image-button" type="button">Download Image</button>
+        <button id="retake-photo-button" type="button" disabled>Retake Photo</button>
+        <button id="download-image-button" type="button" disabled>Download Image</button>
       </nav>
+
+      <section aria-labelledby="voice-controls-heading">
+        <h2 id="voice-controls-heading">Optional voice recognition</h2>
+        <p id="voice-disclosure">
+          Speech input may be processed by your browser's or its vendor's speech-recognition service
+          and may require an internet connection.
+        </p>
+        <label>
+          <input id="voice-disclosure-acknowledgment" type="checkbox" disabled>
+          I understand how speech input may be processed.
+        </label>
+        <button id="start-voice-button" type="button" disabled>Start voice recognition</button>
+        <button id="stop-voice-button" type="button" disabled>Stop voice recognition</button>
+      </section>
 
       <p id="app-status" role="status" aria-live="polite" aria-atomic="true">
         Ready.

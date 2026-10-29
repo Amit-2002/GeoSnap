@@ -54,8 +54,8 @@
 
 ### Implementation for User Story 3
 
-- [ ] T010 [US3] Implement Retake in `src/app.js` and expose its state-guarded control in `index.html`, discarding the active photo and labelled preview and returning to live camera capture.
-- [ ] T011 [US3] Implement Download image in `src/app.js` and `index.html`, initiating a browser download of the composed preview with its label embedded; transition to `downloaded-photo` when the browser download is initiated (do not represent this as confirmation that the file was saved), and preserve the preview with actionable retry feedback if initiation fails.
+- [X] T010 [US3] Implement Retake in `src/app.js` and expose its state-guarded control in `index.html`, discarding the active photo and labelled preview and returning to live camera capture.
+- [X] T011 [US3] Implement Download image in `src/app.js` and `index.html`, initiating a browser download of the composed preview with its label embedded; transition to `downloaded-photo` when the browser download is initiated (do not represent this as confirmation that the file was saved), and preserve the preview with actionable retry feedback if initiation fails.
 
 **Checkpoint**: The complete visible-control capture-to-download journey, including retake, is functional and validated before voice work begins.
 
@@ -69,9 +69,9 @@
 
 ### Implementation for User Story 2
 
-- [ ] T012 [US2] Add explicit Start voice control and Stop voice control actions in `index.html` and `src/app.js`, feature-detecting supported Web Speech recognition implementations and displaying the browser/vendor audio-processing disclosure before listening begins.
-- [ ] T013 [US2] Implement final-result-only voice normalization and the existing full-phrase allowlist (`take photo`, `refresh location`, `retake photo`, `download image`) in `src/app.js`; route each intent through the same action functions as its visible control, reject duplicate results, and enforce the contract's current-state guards.
-- [ ] T014 [US2] Display recognized text and listening/unclear/unsupported/permission/error statuses through the shared status region in `src/app.js`; ensure unclear, unsupported, duplicate, or state-invalid speech never triggers an unrelated action.
+- [X] T012 [US2] Add explicit Start voice control and Stop voice control actions in `index.html` and `src/app.js`, feature-detecting supported Web Speech recognition implementations and displaying the browser/vendor audio-processing disclosure before listening begins.
+- [X] T013 [US2] Implement final-result-only voice normalization and the existing full-phrase allowlist (`take photo`, `refresh location`, `retake photo`, `download image`) in `src/app.js`; route each intent through the same action functions as its visible control, reject duplicate results, and enforce the contract's current-state guards.
+- [X] T014 [US2] Display recognized text and listening/unclear/unsupported/permission/error statuses through the shared status region in `src/app.js`; ensure unclear, unsupported, duplicate, or state-invalid speech never triggers an unrelated action.
 
 **Checkpoint**: Voice is an optional enhancement over the completed manual workflow and cannot bypass its action validation or error handling.
 
